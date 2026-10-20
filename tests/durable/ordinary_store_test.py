@@ -12,7 +12,7 @@ import pytest
 from nio.crypto import OlmAccount, OlmDevice
 from nio.exceptions import LocalProtocolError
 from nio.store import DefaultStore, SqliteStore
-from nio.store._sqlite_lease import LeasedSqliteDatabase
+from nio.store._sqlite_lease import FileLease, LeasedSqliteDatabase
 
 from .store_test import CONSUMER, DEVICE, USER, open_store
 
@@ -57,6 +57,7 @@ store.close()
         second.database.close()
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows uses LockFileEx")
 def test_package_import_without_fcntl_and_ownership_failure(tmp_path):
     program = """
 import sys
@@ -85,6 +86,30 @@ for factory in (
         timeout=20,
     )
     assert result.returncode == 0, result.stderr
+
+
+def test_shared_leases_exclude_exclusive_adoption(tmp_path):
+    path = tmp_path / "store.db"
+    first = FileLease(path, exclusive=False)
+    second = FileLease(path, exclusive=False)
+    try:
+        with pytest.raises(LocalProtocolError, match="lease"):
+            FileLease(path)
+        first.close()
+        with pytest.raises(LocalProtocolError, match="lease"):
+            FileLease(path)
+    finally:
+        first.close()
+        second.close()
+
+    exclusive = FileLease(path)
+    try:
+        with pytest.raises(LocalProtocolError, match="lease"):
+            FileLease(path, exclusive=False)
+    finally:
+        exclusive.close()
+    shared = FileLease(path, exclusive=False)
+    shared.close()
 
 
 def test_failed_connection_initialization_releases_lease(tmp_path, monkeypatch):
