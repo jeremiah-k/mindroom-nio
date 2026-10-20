@@ -55,6 +55,18 @@ jobs:
       - name: Run tests
         run: uv run --locked pytest --benchmark-disable
 
+  windows-store-leases:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install uv
+        uses: astral-sh/setup-uv@v9.0.0
+        with:
+          enable-cache: true
+          python-version: "3.13"
+      - name: Check ordinary and durable SQLite ownership
+        run: uv run --locked --python 3.13 pytest --benchmark-disable tests/durable/ordinary_store_test.py tests/durable/store_test.py
+
   coverage:
     runs-on: ubuntu-latest
     steps:
