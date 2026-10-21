@@ -72,7 +72,7 @@ class FileLease:
     """Lifetime sidecar lock; live database path replacement is unsupported."""
 
     def __init__(self, database_path: Path, *, exclusive: bool = True) -> None:
-        if os.name != "nt":
+        if sys.platform != "win32":
             try:
                 import fcntl
             except ImportError as error:
@@ -85,7 +85,7 @@ class FileLease:
             f"{database_path.resolve()}.ingest.lock", os.O_CREAT | os.O_RDWR, 0o600
         )
         try:
-            if os.name == "nt":
+            if sys.platform == "win32":
                 _windows_lease(self.fd, exclusive=exclusive)
             else:
                 mode = fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH
@@ -109,7 +109,7 @@ class FileLease:
         if self.fd >= 0:
             fd, self.fd = self.fd, -1
             try:
-                if os.name == "nt" and self._locked:
+                if sys.platform == "win32" and self._locked:
                     _windows_lease(fd, exclusive=False, unlock=True)
             finally:
                 self._locked = False

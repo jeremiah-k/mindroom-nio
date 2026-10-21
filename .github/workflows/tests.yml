@@ -17,10 +17,12 @@ jobs:
         with:
           enable-cache: true
           python-version: "3.14"
-      - name: Check types
+      - name: Check Linux and Windows types
         env:
           MYPYPATH: src
-        run: uv run --locked mypy -p nio --warn-redundant-casts --no-incremental
+        run: |
+          uv run --locked mypy -p nio --warn-redundant-casts --no-incremental
+          uv run --locked mypy -p nio --platform win32 --warn-redundant-casts --no-incremental
 
   pre-commit-check:
     runs-on: ubuntu-latest
@@ -59,20 +61,17 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v7
-        with:
-          # A legacy encryption fixture contains a colon, illegal in Windows paths.
-          # The selected durable tests do not need those fixture databases.
-          sparse-checkout: |
-            /*
-            !/tests/data/encryption/
-          sparse-checkout-cone-mode: false
       - name: Install uv
         uses: astral-sh/setup-uv@v9.0.0
         with:
           enable-cache: true
           python-version: "3.13"
       - name: Check ordinary and durable SQLite ownership
-        run: uv run --locked --python 3.13 pytest --benchmark-disable tests/durable/ordinary_store_test.py tests/durable/store_test.py
+        run: >
+          uv run --locked --python 3.13 pytest --benchmark-disable
+          tests/durable/ordinary_store_test.py tests/durable/store_test.py
+          tests/durable_adoption_test.py
+          tests/encryption_test.py::TestClass::test_inbound_group_session_pickle_upgrade_from_libolm
 
   coverage:
     runs-on: ubuntu-latest
