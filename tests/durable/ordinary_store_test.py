@@ -1,6 +1,7 @@
 """Ordinary SQLite connections exclude adoption for their physical lifetime."""
 
 import gc
+import os
 import sqlite3
 import subprocess
 import sys
@@ -9,6 +10,7 @@ import weakref
 
 import pytest
 
+from nio._storage_names import _windows_account_stem, account_filename_stem
 from nio.crypto import OlmAccount, OlmDevice
 from nio.exceptions import LocalProtocolError
 from nio.store import DefaultStore, SqliteStore
@@ -209,3 +211,65 @@ def test_durable_rejects_prototype_marker_before_schema_writes(tmp_path, marker)
         assert connection.execute(
             "SELECT name FROM sqlite_master WHERE type='table'"
         ).fetchall() == [(marker,)]
+
+
+def test_windows_account_filename_stems_are_safe_and_unambiguous():
+    a = _windows_account_stem("@alice:example.org", "ALICE")
+    assert a == _windows_account_stem("@alice:example.org", "ALICE")
+    assert a != _windows_account_stem("@alice:example.org", "OTHER")
+    assert a != _windows_account_stem("@alice/example.org", "ALICE")
+    assert a != _windows_account_stem("@alice:example.org_ALICE")
+    assert len(a) == 68
+    assert a.startswith("nio-")
+    assert set(a[4:]) <= set("0123456789abcdef")
+
+
+def test_default_filenames_agree_across_ordinary_durable_and_sidecars(tmp_path):
+    expected = f"{account_filename_stem(USER, DEVICE)}.db"
+    ordinary = DefaultStore(USER, DEVICE, str(tmp_path))
+    try:
+        assert ordinary.database_name == expected
+        assert ordinary.database_path == str(tmp_path / expected)
+        stem = account_filename_stem(USER, DEVICE)
+        for name, suffix in (
+            (ordinary.trust_db, "trusted_devices"),
+            (ordinary.blacklist_db, "blacklisted_devices"),
+            (ordinary.ignore_db, "ignored_devices"),
+        ):
+            assert name._filename == str(tmp_path / f"{stem}.{suffix}")
+        if os.name == "nt":
+            assert ":" not in expected
+            assert ":" not in ordinary.trust_db._filename
+    finally:
+        ordinary.database.close()
+    durable = open_store(tmp_path, source_store_class=DefaultStore)
+    try:
+        assert durable.path == tmp_path / expected
+    finally:
+        durable.close()
+
+
+def test_explicit_database_name_is_not_rewritten(tmp_path):
+    ordinary = SqliteStore(USER, DEVICE, str(tmp_path), database_name="state.db")
+    try:
+        assert ordinary.database_name == "state.db"
+        assert ordinary.database_path == str(tmp_path / "state.db")
+    finally:
+        ordinary.database.close()
+    durable = open_store(tmp_path / "explicit", database_name="state.db")
+    try:
+        assert durable.path.name == "state.db"
+    finally:
+        durable.close()
+
+
+def test_cross_signing_sidecar_filename_is_windows_safe(tmp_path):
+    from nio.crypto.cross_signing import cross_signing_sidecar_path
+
+    path = cross_signing_sidecar_path(str(tmp_path), USER)
+    assert path.parent == tmp_path
+    if os.name == "nt":
+        assert path.name == f"{account_filename_stem(USER)}_cross_signing.json"
+        assert ":" not in path.name
+    else:
+        assert path.name == f"{USER}_cross_signing.json"

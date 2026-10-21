@@ -75,7 +75,7 @@ def make_legacy_store(path, store_class, state):
     ordinary.verify_device(devices["@bob:example.org"]["verified"])
     ordinary.blacklist_device(devices["@bob:example.org"]["blacklisted"])
     ordinary.ignore_device(devices["@bob:example.org"]["ignored"])
-    database_path = path / f"{USER}_{DEVICE}.db"
+    database_path = path / ordinary.database_name
     ordinary.database.close()
 
     with sqlite3.connect(database_path) as database:
