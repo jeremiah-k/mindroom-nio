@@ -229,7 +229,7 @@ def test_account_binding_survives_a_store_without_crypto_keys(tmp_path):
             user_id="@different:example.org",
             device_id=DEVICE,
             consumer_id=CONSUMER,
-            database_name=f"{USER}_{DEVICE}.db",
+            database_name=store.path.name,
         )
 
 

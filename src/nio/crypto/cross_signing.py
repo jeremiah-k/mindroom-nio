@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Any, cast
 from Crypto.PublicKey import ECC
 from Crypto.Signature import eddsa
 
+from .._storage_names import account_filename_stem
 from ..api import Api
 
 if TYPE_CHECKING:
@@ -191,10 +192,12 @@ def cross_signing_sidecar_path(store_path: str, user_id: str) -> Path:
     Raises ValueError if the resolved path would escape ``store_path``.
     """
     root = Path(store_path).resolve()
-    path = (
-        root
-        / f"{_sanitize_user_id_for_filename(user_id)}{CROSS_SIGNING_SIDECAR_SUFFIX}"
-    ).resolve()
+    filename = (
+        account_filename_stem(user_id)
+        if os.name == "nt"
+        else _sanitize_user_id_for_filename(user_id)
+    )
+    path = (root / f"{filename}{CROSS_SIGNING_SIDECAR_SUFFIX}").resolve()
     if root != path.parent:
         msg = f"Refusing cross-signing sidecar path outside the store: {user_id!r}"
         raise ValueError(msg)

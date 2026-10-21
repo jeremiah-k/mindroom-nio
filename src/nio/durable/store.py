@@ -13,6 +13,7 @@ from uuid import UUID, uuid4
 
 from peewee import SqliteDatabase
 
+from .._storage_names import account_filename_stem
 from ..crypto import TrustState
 from ..exceptions import LocalProtocolError
 from ..store import (
@@ -80,7 +81,9 @@ class DurableStore:
             )
         store_path = Path(store_path)
         store_path.mkdir(parents=True, exist_ok=True)
-        self.path = store_path / (database_name or f"{user_id}_{device_id}.db")
+        self.path = store_path / (
+            database_name or f"{account_filename_stem(user_id, device_id)}.db"
+        )
         self._closed = False
         self._pid = os.getpid()
         self._room_metadata: dict[str, str] | None = None
@@ -196,12 +199,11 @@ class DurableStore:
         )
 
     def _adopt_trust(self, user_id: str, device_id: str) -> None:
+        stem = account_filename_stem(user_id, device_id)
         sidecars = [
             (
                 state,
-                KeyStore(
-                    str(self.path.parent / f"{user_id}_{device_id}.{suffix}_devices")
-                ),
+                KeyStore(str(self.path.parent / f"{stem}.{suffix}_devices")),
             )
             for state, suffix in (
                 (TrustState.verified, "trusted"),

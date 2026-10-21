@@ -26,6 +26,7 @@ from typing import ClassVar
 from peewee import DoesNotExist, SqliteDatabase
 from playhouse.sqliteq import SqliteQueueDatabase
 
+from .._storage_names import account_filename_stem
 from ..crypto import (
     DeviceStore,
     GroupSessionStore,
@@ -150,7 +151,9 @@ class MatrixStore:
         self._update_version(2)
 
     def __post_init__(self) -> None:
-        self.database_name = self.database_name or f"{self.user_id}_{self.device_id}.db"
+        self.database_name = self.database_name or (
+            f"{account_filename_stem(self.user_id, self.device_id)}.db"
+        )
         self.database_path = os.path.join(self.store_path, self.database_name)
         try:
             self._post_init_ordinary_store()
@@ -794,19 +797,18 @@ class DefaultStore(MatrixStore):
                 ownership_assertion = (
                     assert_owner if self._trust_sidecar_coordinated else None
                 )
-                trust_file_path = f"{self.user_id}_{self.device_id}.trusted_devices"
+                stem = account_filename_stem(self.user_id, self.device_id)
+                trust_file_path = f"{stem}.trusted_devices"
                 self.trust_db = KeyStore(
                     os.path.join(self.store_path, trust_file_path),
                     ownership_assertion,
                 )
-                blacklist_file_path = (
-                    f"{self.user_id}_{self.device_id}.blacklisted_devices"
-                )
+                blacklist_file_path = f"{stem}.blacklisted_devices"
                 self.blacklist_db = KeyStore(
                     os.path.join(self.store_path, blacklist_file_path),
                     ownership_assertion,
                 )
-                ignore_file_path = f"{self.user_id}_{self.device_id}.ignored_devices"
+                ignore_file_path = f"{stem}.ignored_devices"
                 self.ignore_db = KeyStore(
                     os.path.join(self.store_path, ignore_file_path),
                     ownership_assertion,
