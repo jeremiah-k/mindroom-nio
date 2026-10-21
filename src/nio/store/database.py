@@ -97,7 +97,12 @@ def use_default_trust_sidecars(fn):
 
 @dataclass
 class MatrixStore:
-    """Storage class for matrix state."""
+    """Storage class for matrix state.
+
+    Default database and trust-sidecar names retain the user/device IDs on
+    POSIX. On Windows they use a stable SHA-256 identity hash to avoid reserved
+    characters and long filenames. Explicit database names are used unchanged.
+    """
 
     supports_threaded_encrypted_room_writes: ClassVar[bool] = True
     models = [

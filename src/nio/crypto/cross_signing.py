@@ -189,6 +189,7 @@ def _sanitize_user_id_for_filename(user_id: str) -> str:
 def cross_signing_sidecar_path(store_path: str, user_id: str) -> Path:
     """The on-disk location of one account's cross-signing identity.
 
+    Windows uses a stable account hash; POSIX retains the sanitized user ID.
     Raises ValueError if the resolved path would escape ``store_path``.
     """
     root = Path(store_path).resolve()

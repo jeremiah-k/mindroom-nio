@@ -7,6 +7,7 @@ import subprocess
 import sys
 import threading
 import weakref
+from pathlib import Path
 
 import pytest
 
@@ -95,6 +96,7 @@ def test_shared_leases_exclude_exclusive_adoption(tmp_path):
     first = FileLease(path, exclusive=False)
     second = FileLease(path, exclusive=False)
     try:
+        assert Path(f"{path}.ingest.lock").stat().st_size == 0
         with pytest.raises(LocalProtocolError, match="lease"):
             FileLease(path)
         first.close()
@@ -107,11 +109,49 @@ def test_shared_leases_exclude_exclusive_adoption(tmp_path):
     exclusive = FileLease(path)
     try:
         with pytest.raises(LocalProtocolError, match="lease"):
+            FileLease(path)
+        with pytest.raises(LocalProtocolError, match="lease"):
             FileLease(path, exclusive=False)
     finally:
         exclusive.close()
     shared = FileLease(path, exclusive=False)
     shared.close()
+
+
+@pytest.mark.parametrize("held_exclusive", [False, True])
+@pytest.mark.parametrize("requested_exclusive", [False, True])
+def test_lease_modes_across_processes(tmp_path, held_exclusive, requested_exclusive):
+    path = tmp_path / "store.db"
+    program = """
+import sys
+from pathlib import Path
+from nio.exceptions import LocalProtocolError
+from nio.store._sqlite_lease import FileLease
+try:
+    lease = FileLease(Path(sys.argv[1]), exclusive=sys.argv[2] == 'True')
+except LocalProtocolError as error:
+    assert 'lease' in str(error)
+    sys.exit(3)
+lease.close()
+"""
+
+    def attempt():
+        return subprocess.run(
+            [sys.executable, "-c", program, str(path), str(requested_exclusive)],
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+
+    held = FileLease(path, exclusive=held_exclusive)
+    try:
+        result = attempt()
+        expected = 3 if held_exclusive or requested_exclusive else 0
+        assert result.returncode == expected, result.stderr
+    finally:
+        held.close()
+    result = attempt()
+    assert result.returncode == 0, result.stderr
 
 
 def test_failed_connection_initialization_releases_lease(tmp_path, monkeypatch):
@@ -202,7 +242,7 @@ def test_default_sidecar_operation_holds_lease_through_connection_close(
 
 @pytest.mark.parametrize("marker", ["NioIngestMeta", "nioingestmeta"])
 def test_durable_rejects_prototype_marker_before_schema_writes(tmp_path, marker):
-    path = tmp_path / f"{USER}_{DEVICE}.db"
+    path = tmp_path / f"{account_filename_stem(USER, DEVICE)}.db"
     with sqlite3.connect(path) as connection:
         connection.execute(f"CREATE TABLE {marker} (id INTEGER)")
     with pytest.raises(LocalProtocolError, match="unmerged ingestion"):
@@ -239,7 +279,7 @@ def test_default_filenames_agree_across_ordinary_durable_and_sidecars(tmp_path):
             assert name._filename == str(tmp_path / f"{stem}.{suffix}")
         if os.name == "nt":
             assert ":" not in expected
-            assert ":" not in ordinary.trust_db._filename
+            assert ":" not in Path(ordinary.trust_db._filename).name
     finally:
         ordinary.database.close()
     durable = open_store(tmp_path, source_store_class=DefaultStore)
