@@ -13,7 +13,10 @@ from uuid import UUID, uuid4
 
 from peewee import SqliteDatabase
 
-from .._storage_names import account_filename_stem
+from .._storage_names import (
+    account_filename_stem,
+    refuse_stranded_windows_account_state,
+)
 from ..crypto import TrustState
 from ..exceptions import LocalProtocolError
 from ..store import (
@@ -79,6 +82,15 @@ class DurableStore:
             raise LocalProtocolError(
                 "durable adoption requires a built-in SQLite store"
             )
+        refuse_stranded_windows_account_state(
+            os.fspath(store_path),
+            user_id,
+            device_id,
+            new_database_path=os.path.join(
+                os.fspath(store_path),
+                database_name or f"{account_filename_stem(user_id, device_id)}.db",
+            ),
+        )
         store_path = Path(store_path)
         store_path.mkdir(parents=True, exist_ok=True)
         self.path = store_path / (

@@ -313,3 +313,47 @@ def test_cross_signing_sidecar_filename_is_windows_safe(tmp_path):
         assert ":" not in path.name
     else:
         assert path.name == f"{USER}_cross_signing.json"
+
+
+def test_windows_store_refuses_to_strand_legacy_account_state(tmp_path, monkeypatch):
+    legacy = tmp_path / f"{USER}_{DEVICE}.db"
+    legacy.write_bytes(b"legacy account database")
+    monkeypatch.setattr(os, "name", "nt")
+
+    with pytest.raises(
+        LocalProtocolError, match="legacy account state present"
+    ) as info:
+        SqliteStore(USER, DEVICE, str(tmp_path))
+
+    message = str(info.value)
+    assert str(legacy) in message
+    assert account_filename_stem(USER, DEVICE) in message
+
+
+def test_windows_durable_store_refuses_to_strand_legacy_account_state(
+    tmp_path, monkeypatch
+):
+    from nio.durable.store import DurableStore
+
+    legacy = tmp_path / f"{USER}_{DEVICE}.trusted_devices"
+    legacy.write_bytes(b"legacy trust sidecar")
+    monkeypatch.setattr(os, "name", "nt")
+
+    with pytest.raises(LocalProtocolError, match="legacy account state present"):
+        DurableStore(
+            tmp_path,
+            user_id=USER,
+            device_id=DEVICE,
+            consumer_id=CONSUMER,
+        )
+
+
+def test_windows_probe_allows_store_directory_without_legacy_artifacts(
+    tmp_path, monkeypatch
+):
+    from nio._storage_names import refuse_stranded_windows_account_state
+
+    (tmp_path / f"{_windows_account_stem(USER, DEVICE)}.db").write_bytes(b"new")
+    monkeypatch.setattr(os, "name", "nt")
+
+    refuse_stranded_windows_account_state(str(tmp_path), USER, DEVICE)
