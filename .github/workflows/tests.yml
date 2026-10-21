@@ -59,6 +59,13 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          # A legacy encryption fixture contains a colon, illegal in Windows paths.
+          # The selected durable tests do not need those fixture databases.
+          sparse-checkout: |
+            /*
+            !/tests/data/encryption/
+          sparse-checkout-cone-mode: false
       - name: Install uv
         uses: astral-sh/setup-uv@v9.0.0
         with:

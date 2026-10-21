@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import sqlite3
+import sys
 from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -15,6 +16,9 @@ from ..exceptions import LocalProtocolError
 
 def _windows_lease(fd: int, *, exclusive: bool, unlock: bool = False) -> None:
     """Hold or release one sidecar byte using native shared/exclusive locks."""
+    if sys.platform != "win32":
+        raise OSError("Windows store leases require native Windows")
+
     import ctypes
     import msvcrt
     from ctypes import wintypes
