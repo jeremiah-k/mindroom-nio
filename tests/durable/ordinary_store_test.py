@@ -8,13 +8,14 @@ import sys
 import threading
 import weakref
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from nio._storage_names import _windows_account_stem, account_filename_stem
 from nio.crypto import OlmAccount, OlmDevice
 from nio.exceptions import LocalProtocolError
-from nio.store import DefaultStore, SqliteStore
+from nio.store import DefaultStore, SqliteMemoryStore, SqliteStore
 from nio.store._sqlite_lease import FileLease, LeasedSqliteDatabase
 
 from .store_test import CONSUMER, DEVICE, USER, open_store
@@ -315,29 +316,68 @@ def test_cross_signing_sidecar_filename_is_windows_safe(tmp_path):
         assert path.name == f"{USER}_cross_signing.json"
 
 
-def test_windows_store_refuses_to_strand_legacy_account_state(tmp_path, monkeypatch):
-    legacy = tmp_path / f"{USER}_{DEVICE}.db"
+@pytest.fixture
+def windows_storage_names(monkeypatch):
+    """Exercise Windows names without changing pathlib's platform globally."""
+    from nio import _storage_names
+    from nio.crypto import cross_signing
+
+    windows_os = SimpleNamespace(**{**vars(os), "name": "nt"})
+    monkeypatch.setattr(_storage_names, "os", windows_os)
+    monkeypatch.setattr(cross_signing, "os", windows_os)
+
+
+@pytest.mark.parametrize("store_class", [SqliteStore, DefaultStore])
+@pytest.mark.parametrize(
+    "suffix",
+    [
+        ".db",
+        ".db-wal",
+        ".db-shm",
+        ".db-journal",
+        ".trusted_devices",
+        ".blacklisted_devices",
+        ".ignored_devices",
+    ],
+)
+def test_windows_store_refuses_to_strand_legacy_account_state(
+    tmp_path, windows_storage_names, store_class, suffix
+):
+    legacy = tmp_path / f"{USER}_{DEVICE}{suffix}"
     legacy.write_bytes(b"legacy account database")
-    monkeypatch.setattr(os, "name", "nt")
 
     with pytest.raises(
         LocalProtocolError, match="legacy account state present"
     ) as info:
-        SqliteStore(USER, DEVICE, str(tmp_path))
+        store_class(USER, DEVICE, str(tmp_path))
 
     message = str(info.value)
     assert str(legacy) in message
     assert account_filename_stem(USER, DEVICE) in message
+    assert legacy.read_bytes() == b"legacy account database"
+    assert not (tmp_path / f"{account_filename_stem(USER, DEVICE)}.db").exists()
 
 
+@pytest.mark.parametrize("database_name", [None, "state.db"])
+@pytest.mark.parametrize(
+    "suffix",
+    [
+        ".db",
+        ".db-wal",
+        ".db-shm",
+        ".db-journal",
+        ".trusted_devices",
+        ".blacklisted_devices",
+        ".ignored_devices",
+    ],
+)
 def test_windows_durable_store_refuses_to_strand_legacy_account_state(
-    tmp_path, monkeypatch
+    tmp_path, windows_storage_names, database_name, suffix
 ):
     from nio.durable.store import DurableStore
 
-    legacy = tmp_path / f"{USER}_{DEVICE}.trusted_devices"
+    legacy = tmp_path / f"{USER}_{DEVICE}{suffix}"
     legacy.write_bytes(b"legacy trust sidecar")
-    monkeypatch.setattr(os, "name", "nt")
 
     with pytest.raises(LocalProtocolError, match="legacy account state present"):
         DurableStore(
@@ -345,15 +385,125 @@ def test_windows_durable_store_refuses_to_strand_legacy_account_state(
             user_id=USER,
             device_id=DEVICE,
             consumer_id=CONSUMER,
+            database_name=database_name,
         )
+    assert legacy.read_bytes() == b"legacy trust sidecar"
+    target = database_name or f"{account_filename_stem(USER, DEVICE)}.db"
+    assert not (tmp_path / target).exists()
 
 
 def test_windows_probe_allows_store_directory_without_legacy_artifacts(
-    tmp_path, monkeypatch
+    tmp_path, windows_storage_names
 ):
     from nio._storage_names import refuse_stranded_windows_account_state
 
     (tmp_path / f"{_windows_account_stem(USER, DEVICE)}.db").write_bytes(b"new")
-    monkeypatch.setattr(os, "name", "nt")
 
     refuse_stranded_windows_account_state(str(tmp_path), USER, DEVICE)
+
+
+@pytest.mark.parametrize("store_class", [SqliteStore, DefaultStore])
+@pytest.mark.parametrize("durable", [False, True])
+def test_explicit_legacy_database_can_be_reopened(
+    tmp_path, windows_storage_names, durable, store_class
+):
+    """An explicit legacy path continues to select the existing crypto account."""
+    # A safe legacy ID is readable by SQLite on every platform, so this also
+    # checks preservation of real encrypted state in the native Windows job.
+    user = "legacy"
+    filename = f"{user}_{DEVICE}.db"
+    account = OlmAccount()
+    ordinary = store_class(user, DEVICE, str(tmp_path), database_name=filename)
+    try:
+        ordinary.save_account(account)
+    finally:
+        ordinary.database.close()
+    if durable:
+        from nio.durable.store import DurableStore
+
+        store = DurableStore(
+            tmp_path,
+            user_id=user,
+            device_id=DEVICE,
+            consumer_id=CONSUMER,
+            database_name=filename,
+            source_store_class=store_class,
+        )
+        try:
+            assert store.matrix.load_account().identity_keys == account.identity_keys
+        finally:
+            store.close()
+    else:
+        reopened = store_class(user, DEVICE, str(tmp_path), database_name=filename)
+        try:
+            assert reopened.load_account().identity_keys == account.identity_keys
+        finally:
+            reopened.database.close()
+
+
+@pytest.mark.parametrize("consumer", ["ordinary", "durable", "cross_signing"])
+@pytest.mark.parametrize("user", [USER, "@al/ice\\evil:example.org"])
+def test_legacy_cross_signing_identity_is_not_bypassed(
+    tmp_path, windows_storage_names, consumer, user
+):
+    """Legacy signing keys must not be replaced by an empty hashed identity."""
+    from nio.crypto.cross_signing import (
+        CrossSigningIdentity,
+        cross_signing_sidecar_path,
+    )
+
+    sanitized = user.replace("/", "_").replace("\\", "_")
+    legacy = tmp_path / f"{sanitized}_cross_signing.json"
+    identity = CrossSigningIdentity.generate(user)
+    identity.save(legacy)
+    before = legacy.read_bytes()
+    with pytest.raises(LocalProtocolError, match="legacy account state present"):
+        if consumer == "ordinary":
+            SqliteStore(user, DEVICE, str(tmp_path))
+        elif consumer == "durable":
+            from nio.durable.store import DurableStore
+
+            DurableStore(tmp_path, user_id=user, device_id=DEVICE, consumer_id=CONSUMER)
+        else:
+            cross_signing_sidecar_path(str(tmp_path), user)
+    assert legacy.read_bytes() == before
+    assert not (tmp_path / f"{_windows_account_stem(user, DEVICE)}.db").exists()
+    assert not (tmp_path / f"{_windows_account_stem(user)}_cross_signing.json").exists()
+
+
+def test_migrated_cross_signing_identity_keeps_its_keys(
+    tmp_path, windows_storage_names
+):
+    """Both-name conflicts fail closed; a completed migration reuses the keys."""
+    from nio.crypto.cross_signing import (
+        CrossSigningIdentity,
+        cross_signing_sidecar_path,
+    )
+
+    legacy = tmp_path / f"{USER}_cross_signing.json"
+    target = tmp_path / f"{_windows_account_stem(USER)}_cross_signing.json"
+    identity = CrossSigningIdentity.generate(USER)
+    identity.save(legacy)
+    target.write_bytes(legacy.read_bytes())
+    with pytest.raises(LocalProtocolError, match="legacy account state present"):
+        cross_signing_sidecar_path(str(tmp_path), USER)
+    legacy.unlink()
+    assert cross_signing_sidecar_path(str(tmp_path), USER) == target
+    loaded = CrossSigningIdentity.load(target)
+    assert loaded.master_seed == identity.master_seed
+    assert loaded.self_signing_seed == identity.self_signing_seed
+
+
+def test_memory_store_does_not_probe_legacy_files(
+    tmp_path, windows_storage_names, monkeypatch
+):
+    """An in-memory account must not depend on files in the working directory."""
+    legacy = tmp_path / f"{USER}_{DEVICE}.db"
+    legacy.write_bytes(b"unrelated disk state")
+    monkeypatch.chdir(tmp_path)
+    store = SqliteMemoryStore(USER, DEVICE)
+    try:
+        assert store.load_account() is None
+        assert legacy.read_bytes() == b"unrelated disk state"
+    finally:
+        store.database.close()

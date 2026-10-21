@@ -135,6 +135,14 @@ class MatrixStore:
             cls.supports_threaded_encrypted_room_writes = False
 
     def _create_database(self):
+        """Select an on-disk database without bypassing legacy crypto state."""
+        # Trust sidecars derive from the account stem even with an explicit DB.
+        refuse_stranded_windows_account_state(
+            self.store_path,
+            self.user_id,
+            self.device_id,
+            new_database_path=self.database_path,
+        )
         return LeasedSqliteDatabase(
             self.database_path,
             pragmas={
@@ -163,14 +171,6 @@ class MatrixStore:
             f"{account_filename_stem(self.user_id, self.device_id)}.db"
         )
         self.database_path = os.path.join(self.store_path, self.database_name)
-        # Trust sidecars always derive from the default stem, so legacy
-        # account state is stranded even when a database name was set.
-        refuse_stranded_windows_account_state(
-            self.store_path,
-            self.user_id,
-            self.device_id,
-            new_database_path=self.database_path,
-        )
         try:
             self._post_init_ordinary_store()
         except BaseException:

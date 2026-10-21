@@ -22,7 +22,11 @@ from typing import TYPE_CHECKING, Any, cast
 from Crypto.PublicKey import ECC
 from Crypto.Signature import eddsa
 
-from .._storage_names import account_filename_stem
+from .._storage_names import (
+    CROSS_SIGNING_SIDECAR_SUFFIX,
+    account_filename_stem,
+    refuse_stranded_windows_account_state,
+)
 from ..api import Api
 
 if TYPE_CHECKING:
@@ -30,9 +34,6 @@ if TYPE_CHECKING:
 
     class _EccConstruct(Protocol):
         def __call__(self, *, curve: str, seed: bytes) -> ECC.EccKey: ...
-
-
-CROSS_SIGNING_SIDECAR_SUFFIX = "_cross_signing.json"
 
 
 def _unpadded_b64(data: bytes) -> str:
@@ -191,8 +192,10 @@ def cross_signing_sidecar_path(store_path: str, user_id: str) -> Path:
 
     Windows uses a stable account hash; POSIX retains the sanitized user ID.
     Raises ValueError if the resolved path would escape ``store_path``.
+    Raises LocalProtocolError if legacy Windows signing keys need migration.
     """
     root = Path(store_path).resolve()
+    refuse_stranded_windows_account_state(str(root), user_id)
     filename = (
         account_filename_stem(user_id)
         if os.name == "nt"
