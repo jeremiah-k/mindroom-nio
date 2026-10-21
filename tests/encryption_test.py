@@ -11,6 +11,7 @@ import vodozemac
 from helpers import faker
 
 from nio._compat import package_installed
+from nio._storage_names import account_filename_stem
 from nio.crypto import (
     DeviceStore,
     GroupSessionStore,
@@ -410,13 +411,15 @@ class TestClass:
     def test_inbound_group_session_pickle_upgrade_from_libolm(self, tempdir):
         user_id = "@example:localhost"
         device_id = "DEVICEID"
-        version_name = "libolm_inbound_group_session_pickle_v1"
 
         sender_key = "N6XtYK/YQ0VD3equiUvrCCvCT5gBENB0+igXcb3KkRk"
         session_id = "u1HJVAIqIhdVQ7RzJLRxfNBAsNlE2sIT34Xe3beabHk"
 
-        source = ENCRYPTION_FIXTURES / f"{user_id}_{device_id}.{version_name}.db"
-        target = Path(tempdir) / f"{user_id}_{device_id}.db"
+        source = (
+            ENCRYPTION_FIXTURES
+            / "example_DEVICEID.libolm_inbound_group_session_pickle_v1.db"
+        )
+        target = Path(tempdir) / f"{account_filename_stem(user_id, device_id)}.db"
         copyfile(source, target)
 
         # libolm pickle format

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import sqlite3
+import sys
 from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -13,23 +14,83 @@ from peewee import SqliteDatabase
 from ..exceptions import LocalProtocolError
 
 
+def _windows_lease(fd: int, *, exclusive: bool, unlock: bool = False) -> None:
+    """Hold or release one sidecar byte using native shared/exclusive locks."""
+    if sys.platform != "win32":
+        raise OSError("Windows store leases require native Windows")
+
+    import ctypes
+    import msvcrt
+    from ctypes import wintypes
+
+    class Overlapped(ctypes.Structure):
+        _fields_ = [
+            ("Internal", ctypes.c_size_t),
+            ("InternalHigh", ctypes.c_size_t),
+            ("Offset", wintypes.DWORD),
+            ("OffsetHigh", wintypes.DWORD),
+            ("hEvent", wintypes.HANDLE),
+        ]
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    handle = msvcrt.get_osfhandle(fd)
+    overlapped = ctypes.byref(Overlapped())
+    if unlock:
+        unlock_file = kernel32.UnlockFileEx
+        unlock_file.argtypes = [
+            wintypes.HANDLE,
+            wintypes.DWORD,
+            wintypes.DWORD,
+            wintypes.DWORD,
+            ctypes.POINTER(Overlapped),
+        ]
+        unlock_file.restype = wintypes.BOOL
+        success = unlock_file(handle, 0, 1, 0, overlapped)
+    else:
+        lock_file = kernel32.LockFileEx
+        lock_file.argtypes = [
+            wintypes.HANDLE,
+            wintypes.DWORD,
+            wintypes.DWORD,
+            wintypes.DWORD,
+            wintypes.DWORD,
+            ctypes.POINTER(Overlapped),
+        ]
+        lock_file.restype = wintypes.BOOL
+        # msvcrt.locking has no shared-lock equivalent to LockFileEx.
+        flags = 0x01 | (0x02 if exclusive else 0)  # FAIL_IMMEDIATELY | EXCLUSIVE
+        success = lock_file(handle, flags, 0, 1, 0, overlapped)
+
+    if not success:
+        code = ctypes.get_last_error()
+        if not unlock and code in (32, 33):  # SHARING_VIOLATION, LOCK_VIOLATION
+            raise BlockingIOError("store lifetime lease is already held")
+        raise OSError(code, ctypes.FormatError(code))
+
+
 class FileLease:
     """Lifetime sidecar lock; live database path replacement is unsupported."""
 
     def __init__(self, database_path: Path, *, exclusive: bool = True) -> None:
-        try:
-            import fcntl
-        except ImportError as error:
-            raise LocalProtocolError(
-                "store filesystem ownership requires fcntl support"
-            ) from error
+        if sys.platform != "win32":
+            try:
+                import fcntl
+            except ImportError as error:
+                raise LocalProtocolError(
+                    "store filesystem ownership requires fcntl support"
+                ) from error
         self.pid = os.getpid()
+        self._locked = False
         self.fd = os.open(
             f"{database_path.resolve()}.ingest.lock", os.O_CREAT | os.O_RDWR, 0o600
         )
         try:
-            mode = fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH
-            fcntl.flock(self.fd, mode | fcntl.LOCK_NB)
+            if sys.platform == "win32":
+                _windows_lease(self.fd, exclusive=exclusive)
+            else:
+                mode = fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH
+                fcntl.flock(self.fd, mode | fcntl.LOCK_NB)
+            self._locked = True
         except BaseException as error:
             self.close()
             if isinstance(error, BlockingIOError):
@@ -46,8 +107,13 @@ class FileLease:
 
     def close(self) -> None:
         if self.fd >= 0:
-            os.close(self.fd)
-            self.fd = -1
+            fd, self.fd = self.fd, -1
+            try:
+                if sys.platform == "win32" and self._locked:
+                    _windows_lease(fd, exclusive=False, unlock=True)
+            finally:
+                self._locked = False
+                os.close(fd)
 
 
 def check_ordinary_database(connection: sqlite3.Connection) -> None:

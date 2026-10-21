@@ -26,6 +26,10 @@ from typing import ClassVar
 from peewee import DoesNotExist, SqliteDatabase
 from playhouse.sqliteq import SqliteQueueDatabase
 
+from .._storage_names import (
+    account_filename_stem,
+    refuse_stranded_windows_account_state,
+)
 from ..crypto import (
     DeviceStore,
     GroupSessionStore,
@@ -96,7 +100,12 @@ def use_default_trust_sidecars(fn):
 
 @dataclass
 class MatrixStore:
-    """Storage class for matrix state."""
+    """Storage class for matrix state.
+
+    Default database and trust-sidecar names retain the user/device IDs on
+    POSIX. On Windows they use a stable SHA-256 identity hash to avoid reserved
+    characters and long filenames. Explicit database names are used unchanged.
+    """
 
     supports_threaded_encrypted_room_writes: ClassVar[bool] = True
     models = [
@@ -126,6 +135,14 @@ class MatrixStore:
             cls.supports_threaded_encrypted_room_writes = False
 
     def _create_database(self):
+        """Select an on-disk database without bypassing legacy crypto state."""
+        # Trust sidecars derive from the account stem even with an explicit DB.
+        refuse_stranded_windows_account_state(
+            self.store_path,
+            self.user_id,
+            self.device_id,
+            new_database_path=self.database_path,
+        )
         return LeasedSqliteDatabase(
             self.database_path,
             pragmas={
@@ -150,7 +167,9 @@ class MatrixStore:
         self._update_version(2)
 
     def __post_init__(self) -> None:
-        self.database_name = self.database_name or f"{self.user_id}_{self.device_id}.db"
+        self.database_name = self.database_name or (
+            f"{account_filename_stem(self.user_id, self.device_id)}.db"
+        )
         self.database_path = os.path.join(self.store_path, self.database_name)
         try:
             self._post_init_ordinary_store()
@@ -794,19 +813,18 @@ class DefaultStore(MatrixStore):
                 ownership_assertion = (
                     assert_owner if self._trust_sidecar_coordinated else None
                 )
-                trust_file_path = f"{self.user_id}_{self.device_id}.trusted_devices"
+                stem = account_filename_stem(self.user_id, self.device_id)
+                trust_file_path = f"{stem}.trusted_devices"
                 self.trust_db = KeyStore(
                     os.path.join(self.store_path, trust_file_path),
                     ownership_assertion,
                 )
-                blacklist_file_path = (
-                    f"{self.user_id}_{self.device_id}.blacklisted_devices"
-                )
+                blacklist_file_path = f"{stem}.blacklisted_devices"
                 self.blacklist_db = KeyStore(
                     os.path.join(self.store_path, blacklist_file_path),
                     ownership_assertion,
                 )
-                ignore_file_path = f"{self.user_id}_{self.device_id}.ignored_devices"
+                ignore_file_path = f"{stem}.ignored_devices"
                 self.ignore_db = KeyStore(
                     os.path.join(self.store_path, ignore_file_path),
                     ownership_assertion,

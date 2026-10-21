@@ -22,6 +22,11 @@ from typing import TYPE_CHECKING, Any, cast
 from Crypto.PublicKey import ECC
 from Crypto.Signature import eddsa
 
+from .._storage_names import (
+    CROSS_SIGNING_SIDECAR_SUFFIX,
+    account_filename_stem,
+    refuse_stranded_windows_account_state,
+)
 from ..api import Api
 
 if TYPE_CHECKING:
@@ -29,9 +34,6 @@ if TYPE_CHECKING:
 
     class _EccConstruct(Protocol):
         def __call__(self, *, curve: str, seed: bytes) -> ECC.EccKey: ...
-
-
-CROSS_SIGNING_SIDECAR_SUFFIX = "_cross_signing.json"
 
 
 def _unpadded_b64(data: bytes) -> str:
@@ -188,13 +190,18 @@ def _sanitize_user_id_for_filename(user_id: str) -> str:
 def cross_signing_sidecar_path(store_path: str, user_id: str) -> Path:
     """The on-disk location of one account's cross-signing identity.
 
+    Windows uses a stable account hash; POSIX retains the sanitized user ID.
     Raises ValueError if the resolved path would escape ``store_path``.
+    Raises LocalProtocolError if legacy Windows signing keys need migration.
     """
     root = Path(store_path).resolve()
-    path = (
-        root
-        / f"{_sanitize_user_id_for_filename(user_id)}{CROSS_SIGNING_SIDECAR_SUFFIX}"
-    ).resolve()
+    refuse_stranded_windows_account_state(str(root), user_id)
+    filename = (
+        account_filename_stem(user_id)
+        if os.name == "nt"
+        else _sanitize_user_id_for_filename(user_id)
+    )
+    path = (root / f"{filename}{CROSS_SIGNING_SIDECAR_SUFFIX}").resolve()
     if root != path.parent:
         msg = f"Refusing cross-signing sidecar path outside the store: {user_id!r}"
         raise ValueError(msg)
