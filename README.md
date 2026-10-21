@@ -86,6 +86,9 @@ $ pip install "mindroom-nio[e2e]"
 Additionally, a docker image with the e2ee enabled version of nio is provided in
 the `docker/` directory.
 
+For native Windows, see [SQLite crypto stores on Windows](doc/windows-storage.md)
+for storage names, ownership leases, and migration of existing state.
+
 Examples
 --------
 
