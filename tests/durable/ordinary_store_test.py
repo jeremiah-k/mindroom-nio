@@ -441,6 +441,21 @@ def test_explicit_legacy_database_can_be_reopened(
             reopened.database.close()
 
 
+def _write_legacy_signing_identity(identity, path):
+    """Model the old in-place writer, including NTFS alternate data streams.
+
+    The current atomic publisher intentionally cannot replace a colon-named
+    stream. Serialize through a safe staging name, then create the historical
+    artifact with the legacy write semantics the migration guard must detect.
+    """
+    staging = path.with_name("legacy-signing-seed.json")
+    try:
+        identity.save(staging)
+        path.write_bytes(staging.read_bytes())
+    finally:
+        staging.unlink(missing_ok=True)
+
+
 @pytest.mark.parametrize("consumer", ["ordinary", "durable", "cross_signing"])
 @pytest.mark.parametrize("user", [USER, "@al/ice\\evil:example.org"])
 def test_legacy_cross_signing_identity_is_not_bypassed(
@@ -455,7 +470,7 @@ def test_legacy_cross_signing_identity_is_not_bypassed(
     sanitized = user.replace("/", "_").replace("\\", "_")
     legacy = tmp_path / f"{sanitized}_cross_signing.json"
     identity = CrossSigningIdentity.generate(user)
-    identity.save(legacy)
+    _write_legacy_signing_identity(identity, legacy)
     before = legacy.read_bytes()
     with pytest.raises(LocalProtocolError, match="legacy account state present"):
         if consumer == "ordinary":
@@ -483,7 +498,7 @@ def test_migrated_cross_signing_identity_keeps_its_keys(
     legacy = tmp_path / f"{USER}_cross_signing.json"
     target = tmp_path / f"{_windows_account_stem(USER)}_cross_signing.json"
     identity = CrossSigningIdentity.generate(USER)
-    identity.save(legacy)
+    _write_legacy_signing_identity(identity, legacy)
     target.write_bytes(legacy.read_bytes())
     with pytest.raises(LocalProtocolError, match="legacy account state present"):
         cross_signing_sidecar_path(str(tmp_path), USER)
