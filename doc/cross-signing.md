@@ -12,7 +12,9 @@ The producer side of the official Matrix cross-signing spec, scoped to what a
 bot needs to remain usable under MSC4153 ("exclude non-cross-signed devices"):
 
 - Generate a master key and a self-signing key (Ed25519), persisted next to the
-  encryption store in a `0600` sidecar.
+  encryption store in a `0600` sidecar. Saves use the SDK's shared atomic file
+  writer: a private temporary file is flushed before replacement, and a failed
+  write or publication preserves the previous identity.
 - Sign the self-signing key with the master key.
 - Sign the account's own device with the self-signing key, uploading the
   device's own keys first when they are not yet on the server.
