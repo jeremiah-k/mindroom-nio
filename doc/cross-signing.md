@@ -14,7 +14,12 @@ bot needs to remain usable under MSC4153 ("exclude non-cross-signed devices"):
 - Generate a master key and a self-signing key (Ed25519), persisted next to the
   encryption store in a `0600` sidecar. Saves use the SDK's shared atomic file
   writer: a private temporary file is flushed before replacement, and a failed
-  write or publication preserves the previous identity.
+  write or publication preserves the previous identity. On POSIX, the parent
+  directory is also synced after publication to harden crash durability. If
+  that final sync fails, a complete new file may already be visible: inspect
+  the sidecar before retrying or attempting any identity recovery. Atomic
+  replacement requires write permission on the containing directory, not only
+  on the existing sidecar; deployments must provision both permissions.
 - Sign the self-signing key with the master key.
 - Sign the account's own device with the self-signing key, uploading the
   device's own keys first when they are not yet on the server.

@@ -52,6 +52,21 @@ def _create_at(tmp_path: str, path: str) -> None:
         os.unlink(tmp_path)
 
 
+def _fsync_parent_directory(directory: str) -> None:
+    """Persist the published directory entry on POSIX filesystems.
+
+    Windows has no portable directory fsync via Python's os module. Its
+    file-replacement durability depends on the platform's filesystem API.
+    """
+    if os.name != "posix":
+        return
+    fd = os.open(directory, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
 @contextmanager
 def atomic_write(
     path: str | os.PathLike[str], overwrite: bool = False
@@ -60,7 +75,11 @@ def atomic_write(
 
     The temporary file is only moved into place after it has been fully
     written and flushed to disk, so readers never observe a partially
-    written file.
+    written file. On POSIX, fsync the containing directory after publication
+    to make the new name durable across a system crash. A directory fsync
+    failure may be reported *after* the replacement is visible; callers must
+    inspect the published file rather than assume a failed call left the old
+    version in place.
 
     The file is created with owner-only (0600) permissions, as
     ``tempfile.mkstemp`` does; the old ``atomicwrites`` package behaved the
@@ -87,6 +106,7 @@ def atomic_write(
             os.replace(tmp_path, path)
         else:
             _create_at(tmp_path, path)
+        _fsync_parent_directory(directory)
     except BaseException:
         try:
             os.unlink(tmp_path)
