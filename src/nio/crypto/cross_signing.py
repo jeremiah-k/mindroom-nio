@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Any, cast
 from Crypto.PublicKey import ECC
 from Crypto.Signature import eddsa
 
+from .._atomic_write import atomic_write
 from ..api import Api
 
 if TYPE_CHECKING:
@@ -110,10 +111,11 @@ class CrossSigningIdentity:
         )
 
     def save(self, path: Path) -> None:
-        """Persist the identity, creating the file with owner-only permissions.
+        """Publish a complete identity through the SDK's atomic file writer.
 
-        The file is opened with mode 0o600 from creation so the private key
-        seeds are never briefly world-readable under the process umask.
+        A failed write or replacement preserves the previous sidecar. Temporary
+        files have owner-only permissions from creation and are flushed before
+        publication; replacing an existing file also restores private permissions.
         """
         payload = {
             "user_id": self.user_id,
@@ -123,8 +125,7 @@ class CrossSigningIdentity:
             "signed_devices": self.signed_devices,
         }
         path.parent.mkdir(parents=True, exist_ok=True)
-        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        with atomic_write(path, overwrite=True) as handle:
             handle.write(json.dumps(payload))
 
     @property
