@@ -910,7 +910,9 @@ class Client:
     ) -> Event | BadEventType | None:
         decrypted_event = self._decrypt_timeline_event(event, room_id)
         if decrypted_event:
-            event = decrypted_event
+            # Matrix never encrypts state, so plaintext claiming a membership, power
+            # levels or other room state is the sender's word and never changes the room.
+            return decrypted_event
 
         if isinstance(event, RoomEncryptionEvent):
             encrypted_rooms.add(room_id)
@@ -925,7 +927,7 @@ class Client:
         else:
             room.handle_event(event)
 
-        return decrypted_event
+        return None
 
     def _decrypt_timeline_event(
         self, event: Event | BadEventType, room_id: str
