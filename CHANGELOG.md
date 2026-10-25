@@ -8,8 +8,10 @@ All notable changes to this project will be documented in this file.
   preserving the existing identity on failed writes or publication and applying
   owner-only permissions to replacements.
 - Sync the containing directory after publishing a sidecar atomically on POSIX
-  so a system crash cannot discard the completed rename, and document that
-  atomic replacement requires write permission on the directory.
+  to request persistence of the completed rename, and document that atomic
+  replacement requires write permission on the directory. Durability depends on
+  platform/storage flush semantics; macOS power-loss persistence is not promised
+  because the writer does not issue F_FULLFSYNC.
 
 ## 1.1.5
 

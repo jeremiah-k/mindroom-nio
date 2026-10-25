@@ -53,10 +53,12 @@ def _create_at(tmp_path: str, path: str) -> None:
 
 
 def _fsync_parent_directory(directory: str) -> None:
-    """Persist the published directory entry on POSIX filesystems.
+    """Request a flush of the published POSIX directory entry.
 
-    Windows has no portable directory fsync via Python's os module. Its
-    file-replacement durability depends on the platform's filesystem API.
+    Durability depends on the operating system, filesystem and storage honoring
+    the request. In particular, macOS fsync does not flush volatile drive caches;
+    this helper does not issue F_FULLFSYNC. Windows has no portable directory
+    fsync via Python's os module.
     """
     if os.name != "posix":
         return
@@ -74,10 +76,13 @@ def atomic_write(
     """Write to ``path`` atomically via a temporary file in the same directory.
 
     The temporary file is only moved into place after it has been fully
-    written and flushed to disk, so readers never observe a partially
-    written file. On POSIX, fsync the containing directory after publication
-    to make the new name durable across a system crash. A directory fsync
-    failure may be reported *after* the replacement is visible; callers must
+    written, flushed and fsynced, so readers never observe a partially
+    written file. On POSIX, also request a containing-directory fsync after
+    publication. These requests rely on platform and storage flush semantics;
+    they do not establish a universal power-loss guarantee. macOS requires
+    F_FULLFSYNC to flush volatile drive caches, which this writer does not issue.
+    A directory fsync failure may be reported *after* the replacement is visible;
+    callers must
     inspect the published file rather than assume a failed call left the old
     version in place.
 

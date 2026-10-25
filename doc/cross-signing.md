@@ -15,8 +15,12 @@ bot needs to remain usable under MSC4153 ("exclude non-cross-signed devices"):
   encryption store in a `0600` sidecar. Saves use the SDK's shared atomic file
   writer: a private temporary file is flushed before replacement, and a failed
   write or publication preserves the previous identity. On POSIX, the parent
-  directory is also synced after publication to harden crash durability. If
-  that final sync fails, a complete new file may already be visible: inspect
+  directory is also synced after publication. Atomic visibility and power-loss
+  durability are separate: the flush requests rely on OS, filesystem and hardware
+  semantics. In particular, macOS fsync does not flush volatile drive caches;
+  this writer does not issue F_FULLFSYNC and does not promise survival of sudden
+  power loss there. See Apple's [filesystem durability explanation](https://developer.apple.com/library/archive/documentation/Cocoa/Conceptual/CoreData/PersistentStoreFeatures.html).
+  If that final sync fails, a complete new file may already be visible: inspect
   the sidecar before retrying or attempting any identity recovery. Atomic
   replacement requires write permission on the containing directory, not only
   on the existing sidecar; deployments must provision both permissions.
