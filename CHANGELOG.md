@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- Publish cross-signing private-key sidecars through the shared atomic writer,
+  preserving the existing identity on failed writes or publication and applying
+  owner-only permissions to replacements.
+- Sync the containing directory after publishing a sidecar atomically on POSIX
+  to request persistence of the completed rename, and document that atomic
+  replacement requires write permission on the directory. Durability depends on
+  platform/storage flush semantics; macOS power-loss persistence is not promised
+  because the writer does not issue F_FULLFSYNC.
+
 ## 1.1.5
 
 - Answer the durable sync loop's routine polls (pending batches, retained input, cursor, acknowledgement and membership intent) from state the store mirrors from its own writes, so a Classic sync issues about half as many SQLite statements on the event loop.
