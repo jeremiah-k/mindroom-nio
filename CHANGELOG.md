@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## 1.2.0
+
+- Add `DurableSync.wait_for_room_ready(room_id)`, which waits until a joined room accepts sends (returning at once when it already does), returns False when the client's recorded membership is not join, and raises `LocalProtocolError` if the session closes; `room_send()` refuses plaintext by the same readiness rule. The runner must keep running and consumed batches must keep being acknowledged while it waits, so do not await it from a callback that holds an unacknowledged batch.
+
 ## 1.1.6
 
 - Never treat decrypted Megolm plaintext as room state or membership: a state event or membership change inside an `m.room.encrypted` event no longer changes `MatrixRoom` (members, power levels, creators), durable membership or the sliding membership proof, and malformed state-shaped plaintext no longer stops durable sync.
