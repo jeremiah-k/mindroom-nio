@@ -2304,19 +2304,16 @@ class AsyncClient(Client):
             except KeyError:
                 raise LocalProtocolError(f"No such room with id {room_id} found.")
 
-            if (
-                self._durable_session is not None
-                and not room.encrypted
-                and not self._durable_session._metadata[room_id].get("baseline")
-            ):
+            durable = self._durable_session
+            if durable is not None and not durable._room_ready(room_id):
                 raise LocalProtocolError(
                     "room state must be established before plaintext sending"
                 )
 
             if room.encrypted:
                 if not room.members_synced:
-                    if self._durable_session is not None:
-                        await self._durable_session._outbound.ensure_members(room_id)
+                    if durable is not None:
+                        await durable._outbound.ensure_members(room_id)
                     else:
                         await self.joined_members(room_id)
                     if self.should_query_keys:
